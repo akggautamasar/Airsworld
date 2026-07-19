@@ -17,6 +17,7 @@ from a phone browser plus the Render dashboard.
 - **Colors** — pick a text color from the toolbar; it's remembered in your browser for next time.
 - **Copy-paste** — paste multi-line text and it flows across the grid, wrapping to a new line on each newline.
 - **Toggleable coordinate display** — a small on/off checkbox in the toolbar shows your current x, y position.
+- **Eraser mode** — a toolbar toggle; while on, tap/click a cell (or drag across several) to clear text instead of typing. The `Delete` key also clears the character at the cursor without moving it.
 
 ## How it works
 
