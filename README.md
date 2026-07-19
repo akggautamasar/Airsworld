@@ -10,6 +10,14 @@ e.g. `yoursite.com/my-page`.
 No local machine or command line needed — everything below can be done
 from a phone browser plus the Render dashboard.
 
+## Features
+
+- **Infinite pages** — any URL path is its own canvas, created the moment someone writes on it.
+- **Live cursor presence** — see other people's cursors moving in real time (ephemeral, never stored).
+- **Colors** — pick a text color from the toolbar; it's remembered in your browser for next time.
+- **Copy-paste** — paste multi-line text and it flows across the grid, wrapping to a new line on each newline.
+- **Toggleable coordinate display** — a small on/off checkbox in the toolbar shows your current x, y position.
+
 ## How it works
 
 - The canvas is split into 20x20 cell **chunks**. Each chunk is stored as

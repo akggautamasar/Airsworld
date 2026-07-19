@@ -4,6 +4,7 @@ import { WebSocketServer } from 'ws';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { randomUUID } from 'node:crypto';
 import { sendMessage, editMessage, readMessage, getChat, pinMessage } from './telegram.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,6 +23,10 @@ const pages = new Map();       // pageName -> Map(cellKey "x,y" -> char)
 const pageIndex = new Map();   // pageName -> Map(chunkKey "cx,cy" -> telegram message_id)
 const dirtyChunks = new Set(); // "page|chunkKey" waiting to be written to Telegram
 let indexDirty = false;
+
+// Cursor positions are ephemeral — kept in memory only, never written to
+// Telegram, and lost on restart (which is fine, they're just live presence).
+const liveCursors = new Map(); // page -> Map(connectionId -> {x, y})
 
 function chunkKeyOf(x, y) {
   return `${Math.floor(x / CHUNK)},${Math.floor(y / CHUNK)}`;
@@ -144,12 +149,36 @@ const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws) => {
+  ws.id = randomUUID();
+
   ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'join') {
       ws.page = msg.page || 'default';
+      // Send this client the current cursor positions of everyone already
+      // on the page, so presence is visible immediately, not just on the
+      // next move.
+      const cursors = liveCursors.get(ws.page);
+      if (cursors) {
+        for (const [id, pos] of cursors.entries()) {
+          if (id !== ws.id) {
+            ws.send(JSON.stringify({ type: 'cursor', id, x: pos.x, y: pos.y }));
+          }
+        }
+      }
+    }
+
+    if (msg.type === 'cursor') {
+      const { page, x, y } = msg;
+      if (!liveCursors.has(page)) liveCursors.set(page, new Map());
+      liveCursors.get(page).set(ws.id, { x, y });
+      for (const client of wss.clients) {
+        if (client !== ws && client.page === page && client.readyState === 1) {
+          client.send(JSON.stringify({ type: 'cursor', id: ws.id, x, y }));
+        }
+      }
     }
 
     if (msg.type === 'requestChunks') {
@@ -182,6 +211,17 @@ wss.on('connection', (ws) => {
       for (const client of wss.clients) {
         if (client !== ws && client.page === page && client.readyState === 1) {
           client.send(JSON.stringify({ type: 'edit', x, y, char }));
+        }
+      }
+    }
+  });
+
+  ws.on('close', () => {
+    if (ws.page && liveCursors.has(ws.page)) {
+      liveCursors.get(ws.page).delete(ws.id);
+      for (const client of wss.clients) {
+        if (client !== ws && client.page === ws.page && client.readyState === 1) {
+          client.send(JSON.stringify({ type: 'cursorLeave', id: ws.id }));
         }
       }
     }
