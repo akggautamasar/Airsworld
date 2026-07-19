@@ -9,7 +9,14 @@
 <body>
 <canvas id="grid"></canvas>
 <input id="mobileInput" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
-<div id="hint">Tap/click a cell, then type. Drag to pan.</div>
+
+<div id="toolbar">
+  <label>Color <input type="color" id="colorPicker" value="#111111" /></label>
+  <label><input type="checkbox" id="coordsToggle" /> Show coordinates</label>
+</div>
+<div id="coords"></div>
+
+<div id="hint">Tap/click a cell, then type. Drag to pan. Paste text to flow it across the grid.</div>
 <script src="/client.js"></script>
 </body>
 </html>

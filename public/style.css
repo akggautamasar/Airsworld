@@ -21,6 +21,45 @@ html, body {
   opacity: 0;
   font-size: 16px; /* prevents iOS Safari auto-zoom on focus */
 }
+#toolbar {
+  position: fixed;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  font: 12px sans-serif;
+  color: #333;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 6px 10px;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+#toolbar label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+#colorPicker {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+#coords {
+  position: fixed;
+  bottom: 8px;
+  right: 8px;
+  font: 12px monospace;
+  color: #333;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: none;
+}
 #hint {
   position: fixed;
   bottom: 8px;

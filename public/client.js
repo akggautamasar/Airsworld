@@ -1,15 +1,63 @@
 const CELL_W = 16, CELL_H = 20, CHUNK = 20;
+const DEFAULT_COLOR = '#111111';
 
 const canvas = document.getElementById('grid');
 const ctx = canvas.getContext('2d');
+const mobileInput = document.getElementById('mobileInput');
+const colorPicker = document.getElementById('colorPicker');
+const coordsToggle = document.getElementById('coordsToggle');
+const coordsDisplay = document.getElementById('coords');
 
 let offsetX = 0, offsetY = 0; // top-left visible cell coordinate
 let cursorX = 0, cursorY = 0;
-const cellData = new Map(); // "x,y" -> char
+const cellData = new Map();     // "x,y" -> encoded cell value (see encodeCell/decodeCell)
+const remoteCursors = new Map(); // connectionId -> {x, y}  (other users, ephemeral)
 const requestedKeys = new Set();
 
 const page = decodeURIComponent(location.pathname.replace(/^\/+/, '')) || 'default';
 document.title = page + " — Air's World";
+
+// ---- Preferences (persisted in this browser only, via localStorage) ----
+let currentColor = localStorage.getItem('aw_color') || DEFAULT_COLOR;
+colorPicker.value = currentColor;
+colorPicker.addEventListener('input', () => {
+  currentColor = colorPicker.value;
+  localStorage.setItem('aw_color', currentColor);
+});
+
+let showCoords = localStorage.getItem('aw_showCoords') === '1';
+coordsToggle.checked = showCoords;
+coordsDisplay.style.display = showCoords ? 'block' : 'none';
+coordsToggle.addEventListener('change', () => {
+  showCoords = coordsToggle.checked;
+  localStorage.setItem('aw_showCoords', showCoords ? '1' : '0');
+  coordsDisplay.style.display = showCoords ? 'block' : 'none';
+  updateCoordsDisplay();
+});
+
+function updateCoordsDisplay() {
+  if (showCoords) coordsDisplay.textContent = `${cursorX}, ${cursorY}`;
+}
+
+// ---- Cell encoding: a plain single character = default color. A colored
+// character is prefixed with a control character (never typed by a user)
+// followed by JSON, so storage stays a single opaque string either way and
+// the server/Telegram side needs no changes at all. ----
+function encodeCell(ch, color) {
+  if (!color || color === DEFAULT_COLOR) return ch;
+  return '\u0001' + JSON.stringify({ c: ch, k: color });
+}
+function decodeCell(value) {
+  if (value && value[0] === '\u0001') {
+    try {
+      const obj = JSON.parse(value.slice(1));
+      return { c: obj.c, k: obj.k || DEFAULT_COLOR };
+    } catch {
+      // fall through to plain-character handling
+    }
+  }
+  return { c: value, k: DEFAULT_COLOR };
+}
 
 function resize() {
   canvas.width = window.innerWidth;
@@ -36,6 +84,12 @@ ws.onmessage = (ev) => {
     const key = `${msg.x},${msg.y}`;
     if (msg.char === '') cellData.delete(key); else cellData.set(key, msg.char);
     draw();
+  } else if (msg.type === 'cursor') {
+    remoteCursors.set(msg.id, { x: msg.x, y: msg.y });
+    draw();
+  } else if (msg.type === 'cursorLeave') {
+    remoteCursors.delete(msg.id);
+    draw();
   }
 };
 
@@ -61,12 +115,26 @@ function requestVisibleChunks() {
   ws.send(JSON.stringify({ type: 'requestChunks', page, chunks: keys }));
 }
 
+// ---- Live cursor presence: broadcast our position (throttled), never stored ----
+let lastCursorSent = 0;
+function broadcastCursor() {
+  const now = Date.now();
+  if (now - lastCursorSent < 120) return;
+  lastCursorSent = now;
+  ws.send(JSON.stringify({ type: 'cursor', page, x: cursorX, y: cursorY }));
+}
+
+function colorForId(id) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) >>> 0;
+  return `hsl(${hash % 360}, 70%, 45%)`;
+}
+
 function draw() {
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.font = '16px monospace';
   ctx.textBaseline = 'top';
-  ctx.fillStyle = '#111111';
 
   const cols = Math.ceil(canvas.width / CELL_W);
   const rows = Math.ceil(canvas.height / CELL_H);
@@ -75,15 +143,31 @@ function draw() {
     for (let col = 0; col <= cols; col++) {
       const x = offsetX + col;
       const y = offsetY + row;
-      const ch = cellData.get(`${x},${y}`);
-      if (ch) ctx.fillText(ch, col * CELL_W, row * CELL_H);
+      const raw = cellData.get(`${x},${y}`);
+      if (!raw) continue;
+      const { c, k } = decodeCell(raw);
+      ctx.fillStyle = k;
+      ctx.fillText(c, col * CELL_W, row * CELL_H);
     }
   }
 
+  // Other users' cursors
+  for (const [id, pos] of remoteCursors.entries()) {
+    const rx = (pos.x - offsetX) * CELL_W;
+    const ry = (pos.y - offsetY) * CELL_H;
+    ctx.strokeStyle = colorForId(id);
+    ctx.lineWidth = 2;
+    ctx.strokeRect(rx + 1, ry + 1, CELL_W - 2, CELL_H - 2);
+  }
+
+  // Our own cursor
   const cx = (cursorX - offsetX) * CELL_W;
   const cy = (cursorY - offsetY) * CELL_H;
+  ctx.lineWidth = 1;
   ctx.strokeStyle = '#2266ee';
   ctx.strokeRect(cx + 0.5, cy + 0.5, CELL_W - 1, CELL_H - 1);
+
+  updateCoordsDisplay();
 }
 
 canvas.addEventListener('click', (e) => {
@@ -93,14 +177,13 @@ canvas.addEventListener('click', (e) => {
   cursorY = offsetY + row;
   mobileInput.value = '';
   mobileInput.focus();
+  broadcastCursor();
   draw();
 });
 
 // All typing (mobile virtual keyboard AND desktop physical keyboard) goes
 // through this hidden input. Character entry and backspace both surface as
 // 'input' events with a value change, which we immediately clear.
-const mobileInput = document.getElementById('mobileInput');
-
 mobileInput.addEventListener('input', (e) => {
   if (e.inputType === 'deleteContentBackward') {
     cursorX--;
@@ -114,6 +197,7 @@ mobileInput.addEventListener('input', (e) => {
   mobileInput.value = '';
   centerViewOnCursor();
   requestVisibleChunks();
+  broadcastCursor();
   draw();
 });
 
@@ -131,13 +215,43 @@ mobileInput.addEventListener('keydown', (e) => {
   e.preventDefault();
   centerViewOnCursor();
   requestVisibleChunks();
+  broadcastCursor();
+  draw();
+});
+
+// Paste: flows pasted text across the grid starting at the cursor, wrapping
+// back to the starting column on each newline.
+mobileInput.addEventListener('paste', (e) => {
+  e.preventDefault();
+  const text = (e.clipboardData || window.clipboardData).getData('text');
+  if (!text) return;
+  const anchorX = cursorX;
+  for (const ch of text) {
+    if (ch === '\r') continue;
+    if (ch === '\n') {
+      cursorX = anchorX;
+      cursorY++;
+      continue;
+    }
+    sendEdit(cursorX, cursorY, ch);
+    cursorX++;
+  }
+  centerViewOnCursor();
+  requestVisibleChunks();
+  broadcastCursor();
   draw();
 });
 
 function sendEdit(x, y, char) {
   const key = `${x},${y}`;
-  if (char === '') cellData.delete(key); else cellData.set(key, char);
-  ws.send(JSON.stringify({ type: 'edit', page, x, y, char }));
+  if (char === '') {
+    cellData.delete(key);
+    ws.send(JSON.stringify({ type: 'edit', page, x, y, char: '' }));
+    return;
+  }
+  const encoded = encodeCell(char, currentColor);
+  cellData.set(key, encoded);
+  ws.send(JSON.stringify({ type: 'edit', page, x, y, char: encoded }));
 }
 
 let dragging = false, dragStartX = 0, dragStartY = 0, panStartX = 0, panStartY = 0;
