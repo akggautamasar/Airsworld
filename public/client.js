@@ -91,26 +91,43 @@ canvas.addEventListener('click', (e) => {
   const row = Math.floor(e.offsetY / CELL_H);
   cursorX = offsetX + col;
   cursorY = offsetY + row;
+  mobileInput.value = '';
+  mobileInput.focus();
   draw();
 });
 
-window.addEventListener('keydown', (e) => {
-  if (e.key === 'ArrowRight') cursorX++;
+// All typing (mobile virtual keyboard AND desktop physical keyboard) goes
+// through this hidden input. Character entry and backspace both surface as
+// 'input' events with a value change, which we immediately clear.
+const mobileInput = document.getElementById('mobileInput');
+
+mobileInput.addEventListener('input', (e) => {
+  if (e.inputType === 'deleteContentBackward') {
+    cursorX--;
+    sendEdit(cursorX, cursorY, '');
+  } else if (e.data) {
+    for (const ch of e.data) {
+      sendEdit(cursorX, cursorY, ch);
+      cursorX++;
+    }
+  }
+  mobileInput.value = '';
+  centerViewOnCursor();
+  requestVisibleChunks();
+  draw();
+});
+
+// Enter and arrow keys don't produce 'input' events on a single-line input,
+// so they're handled here instead.
+mobileInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    cursorX = 0;
+    cursorY++;
+  } else if (e.key === 'ArrowRight') cursorX++;
   else if (e.key === 'ArrowLeft') cursorX--;
   else if (e.key === 'ArrowDown') cursorY++;
   else if (e.key === 'ArrowUp') cursorY--;
-  else if (e.key === 'Backspace') {
-    cursorX--;
-    sendEdit(cursorX, cursorY, '');
-  } else if (e.key === 'Enter') {
-    cursorX = 0;
-    cursorY++;
-  } else if (e.key.length === 1) {
-    sendEdit(cursorX, cursorY, e.key);
-    cursorX++;
-  } else {
-    return;
-  }
+  else return;
   e.preventDefault();
   centerViewOnCursor();
   requestVisibleChunks();
@@ -141,6 +158,40 @@ window.addEventListener('mousemove', (e) => {
   draw();
 });
 window.addEventListener('mouseup', () => (dragging = false));
+
+// Touch: a small tap places the cursor (handled by the 'click' event, which
+// browsers still fire after a tap with little/no movement). A drag beyond a
+// small threshold pans the canvas instead.
+let touchActive = false, touchDragged = false;
+let touchStartX = 0, touchStartY = 0, touchPanStartX = 0, touchPanStartY = 0;
+
+canvas.addEventListener('touchstart', (e) => {
+  const t = e.touches[0];
+  touchActive = true;
+  touchDragged = false;
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+  touchPanStartX = offsetX;
+  touchPanStartY = offsetY;
+}, { passive: true });
+
+canvas.addEventListener('touchmove', (e) => {
+  if (!touchActive) return;
+  const t = e.touches[0];
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+  if (Math.abs(dx) > 6 || Math.abs(dy) > 6) touchDragged = true;
+  if (touchDragged) {
+    offsetX = touchPanStartX - Math.round(dx / CELL_W);
+    offsetY = touchPanStartY - Math.round(dy / CELL_H);
+    requestVisibleChunks();
+    draw();
+  }
+}, { passive: true });
+
+canvas.addEventListener('touchend', () => {
+  touchActive = false;
+}, { passive: true });
 
 function centerViewOnCursor() {
   const cols = Math.floor(canvas.width / CELL_W);
