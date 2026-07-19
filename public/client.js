@@ -7,6 +7,7 @@ const mobileInput = document.getElementById('mobileInput');
 const colorPicker = document.getElementById('colorPicker');
 const coordsToggle = document.getElementById('coordsToggle');
 const coordsDisplay = document.getElementById('coords');
+const eraserToggle = document.getElementById('eraserToggle');
 
 let offsetX = 0, offsetY = 0; // top-left visible cell coordinate
 let cursorX = 0, cursorY = 0;
@@ -37,6 +38,27 @@ coordsToggle.addEventListener('change', () => {
 
 function updateCoordsDisplay() {
   if (showCoords) coordsDisplay.textContent = `${cursorX}, ${cursorY}`;
+}
+
+let eraserMode = localStorage.getItem('aw_eraser') === '1';
+eraserToggle.checked = eraserMode;
+applyEraserCursor();
+eraserToggle.addEventListener('change', () => {
+  eraserMode = eraserToggle.checked;
+  localStorage.setItem('aw_eraser', eraserMode ? '1' : '0');
+  applyEraserCursor();
+});
+function applyEraserCursor() {
+  canvas.style.cursor = eraserMode ? 'cell' : 'text';
+}
+
+// Converts a pointer/touch position (viewport coordinates) into the grid
+// cell it's over, accounting for the canvas's position and current pan offset.
+function cellFromClientXY(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const col = Math.floor((clientX - rect.left) / CELL_W);
+  const row = Math.floor((clientY - rect.top) / CELL_H);
+  return { x: offsetX + col, y: offsetY + row };
 }
 
 // ---- Cell encoding: a plain single character = default color. A colored
@@ -171,10 +193,14 @@ function draw() {
 }
 
 canvas.addEventListener('click', (e) => {
-  const col = Math.floor(e.offsetX / CELL_W);
-  const row = Math.floor(e.offsetY / CELL_H);
-  cursorX = offsetX + col;
-  cursorY = offsetY + row;
+  const { x, y } = cellFromClientXY(e.clientX, e.clientY);
+  if (eraserMode) {
+    sendEdit(x, y, '');
+    draw();
+    return;
+  }
+  cursorX = x;
+  cursorY = y;
   mobileInput.value = '';
   mobileInput.focus();
   broadcastCursor();
@@ -211,7 +237,9 @@ mobileInput.addEventListener('keydown', (e) => {
   else if (e.key === 'ArrowLeft') cursorX--;
   else if (e.key === 'ArrowDown') cursorY++;
   else if (e.key === 'ArrowUp') cursorY--;
-  else return;
+  else if (e.key === 'Delete') {
+    sendEdit(cursorX, cursorY, '');
+  } else return;
   e.preventDefault();
   centerViewOnCursor();
   requestVisibleChunks();
@@ -255,7 +283,15 @@ function sendEdit(x, y, char) {
 }
 
 let dragging = false, dragStartX = 0, dragStartY = 0, panStartX = 0, panStartY = 0;
+let erasingMouse = false;
 canvas.addEventListener('mousedown', (e) => {
+  if (eraserMode) {
+    erasingMouse = true;
+    const { x, y } = cellFromClientXY(e.clientX, e.clientY);
+    sendEdit(x, y, '');
+    draw();
+    return;
+  }
   if (e.shiftKey) {
     dragging = true;
     dragStartX = e.clientX;
@@ -265,13 +301,22 @@ canvas.addEventListener('mousedown', (e) => {
   }
 });
 window.addEventListener('mousemove', (e) => {
+  if (erasingMouse) {
+    const { x, y } = cellFromClientXY(e.clientX, e.clientY);
+    sendEdit(x, y, '');
+    draw();
+    return;
+  }
   if (!dragging) return;
   offsetX = panStartX - Math.round((e.clientX - dragStartX) / CELL_W);
   offsetY = panStartY - Math.round((e.clientY - dragStartY) / CELL_H);
   requestVisibleChunks();
   draw();
 });
-window.addEventListener('mouseup', () => (dragging = false));
+window.addEventListener('mouseup', () => {
+  dragging = false;
+  erasingMouse = false;
+});
 
 // Touch: a small tap places the cursor (handled by the 'click' event, which
 // browsers still fire after a tap with little/no movement). A drag beyond a
@@ -281,6 +326,13 @@ let touchStartX = 0, touchStartY = 0, touchPanStartX = 0, touchPanStartY = 0;
 
 canvas.addEventListener('touchstart', (e) => {
   const t = e.touches[0];
+  if (eraserMode) {
+    const { x, y } = cellFromClientXY(t.clientX, t.clientY);
+    sendEdit(x, y, '');
+    draw();
+    touchActive = false;
+    return;
+  }
   touchActive = true;
   touchDragged = false;
   touchStartX = t.clientX;
@@ -290,8 +342,14 @@ canvas.addEventListener('touchstart', (e) => {
 }, { passive: true });
 
 canvas.addEventListener('touchmove', (e) => {
-  if (!touchActive) return;
   const t = e.touches[0];
+  if (eraserMode) {
+    const { x, y } = cellFromClientXY(t.clientX, t.clientY);
+    sendEdit(x, y, '');
+    draw();
+    return;
+  }
+  if (!touchActive) return;
   const dx = t.clientX - touchStartX;
   const dy = t.clientY - touchStartY;
   if (Math.abs(dx) > 6 || Math.abs(dy) > 6) touchDragged = true;
