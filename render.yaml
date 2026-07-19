@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: airs-world
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: CHAT_ID
+        sync: false
+      - key: INDEX_MESSAGE_ID
+        sync: false
+      - key: PORT
+        value: 3000
