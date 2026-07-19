@@ -4,11 +4,11 @@ import { WebSocketServer } from 'ws';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { sendMessage, editMessage, readMessage } from './telegram.js';
+import { sendMessage, editMessage, readMessage, getChat, pinMessage } from './telegram.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const { BOT_TOKEN, CHAT_ID, PORT = 3000 } = process.env;
-let { INDEX_MESSAGE_ID } = process.env;
+let INDEX_MESSAGE_ID = null;
 
 if (!BOT_TOKEN || !CHAT_ID) {
   console.error('Missing BOT_TOKEN or CHAT_ID. Copy .env.example to .env and fill it in.');
@@ -37,22 +37,27 @@ function getIndex(page) {
 
 // ---- Bootstrap / persist the global index ----
 // The index (which chunk lives in which Telegram message) is itself stored
-// as one Telegram message that we keep editing in place.
+// as one Telegram message that we keep editing in place. To find it again
+// after a restart (without any manual setup step), we PIN that message in
+// the chat and use getChat to read its text straight from the chat info —
+// no need to know or copy a message ID by hand.
 async function loadOrCreateIndex() {
-  if (!INDEX_MESSAGE_ID) {
-    const msg = await sendMessage(BOT_TOKEN, CHAT_ID, '{}');
-    console.log('\n>>> First run: no INDEX_MESSAGE_ID set.');
-    console.log('>>> Add this to your environment variables and restart the server:');
-    console.log(`INDEX_MESSAGE_ID=${msg.message_id}\n`);
-    INDEX_MESSAGE_ID = String(msg.message_id);
-    return {};
+  const chat = await getChat(BOT_TOKEN, CHAT_ID);
+  if (chat.pinned_message && chat.pinned_message.text !== undefined) {
+    INDEX_MESSAGE_ID = chat.pinned_message.message_id;
+    console.log(`Found existing index message (id ${INDEX_MESSAGE_ID}), loading it.`);
+    try {
+      return JSON.parse(chat.pinned_message.text || '{}');
+    } catch {
+      return {};
+    }
   }
-  const text = await readMessage(BOT_TOKEN, CHAT_ID, INDEX_MESSAGE_ID);
-  try {
-    return JSON.parse(text || '{}');
-  } catch {
-    return {};
-  }
+
+  console.log('No pinned index message found — creating and pinning a new one.');
+  const msg = await sendMessage(BOT_TOKEN, CHAT_ID, '{}');
+  INDEX_MESSAGE_ID = msg.message_id;
+  await pinMessage(BOT_TOKEN, CHAT_ID, msg.message_id);
+  return {};
 }
 
 async function flushIndex() {

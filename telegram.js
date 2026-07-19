@@ -32,6 +32,18 @@ export function editMessage(token, chatId, messageId, text) {
   });
 }
 
+export function getChat(token, chatId) {
+  return tgCall(token, 'getChat', { chat_id: chatId });
+}
+
+export function pinMessage(token, chatId, messageId) {
+  return tgCall(token, 'pinChatMessage', {
+    chat_id: chatId,
+    message_id: messageId,
+    disable_notification: true
+  });
+}
+
 // IMPORTANT: The Bot API has no "getMessage" method — a bot cannot fetch the
 // text of an arbitrary past message just by knowing its ID. The workaround
 // used everywhere in this project is to forward the message back into the
